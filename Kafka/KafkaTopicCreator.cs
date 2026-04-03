@@ -5,6 +5,7 @@ namespace Patient_Management_System.Kafka
 {
     public class KafkaTopicCreator(IConfiguration config)
     {
+        public static readonly string PatientUpdatedTopic = "patient-updated";
         private readonly IConfiguration _config = config;
         public async Task CreateTopics()
         {
