@@ -71,6 +71,7 @@ namespace Patient_Management_System.Controllers
             return Ok("Patient deleted successfully!!!");
         }
 
+        [Authorize]
         [HttpPost("patient/{id}/discharge")]
         public async Task<ActionResult> DischargePatient(int id, [FromBody] string dischargeReason)
         {
