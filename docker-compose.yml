@@ -1,0 +1,242 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - ./db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  redis:
+    image: redis:7
+    container_name: redis
+    ports:
+      - "${REDIS_PORT}:6379"
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - internal
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.auth
+    container_name: auth-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      ConnectionStrings__DefaultConnection: ${DB_CONN}
+      ConnectionStrings__RedisConnection: ${REDIS_CONN}
+      ServiceName: Auth
+      Jwt__Key: ${JWT_SECRET}
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - internal
+
+  patient-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.patient
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+    environment:
+      ConnectionStrings__DefaultConnection: ${DB_CONN}
+      ConnectionStrings__RedisConnection: ${REDIS_CONN}
+      Kafka__BootstrapServers: ${KAFKA_BOOTSTRAP_SERVERS}
+      ServiceName: Patient
+      Jwt__Key: ${JWT_SECRET}
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - internal
+
+  billing-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.billing
+    container_name: billing-service
+    restart: unless-stopped 
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+    environment:
+      ConnectionStrings__DefaultConnection: ${DB_CONN}
+      ConnectionStrings__RedisConnection: ${REDIS_CONN}
+      Kafka__BootstrapServers: ${KAFKA_BOOTSTRAP_SERVERS}
+      ServiceName: Billing
+      Jwt__Key: ${JWT_SECRET}
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - internal
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.api-gateway
+    container_name: api-gateway
+    restart: unless-stopped
+    ports:
+      - "${API_GATEWAY_PORT}:4004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      patient-service:
+        condition: service_started
+      billing-service:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      AI__Endpoint: ${AI_ENDPOINT}
+      AI__Model: ${AI_MODEL}
+      ConnectionStrings__DefaultConnection: ${DB_CONN}
+      ConnectionStrings__RedisConnection: ${REDIS_CONN}
+      Kafka__BootstrapServers: ${KAFKA_BOOTSTRAP_SERVERS}
+      ServiceName: Gateway
+      Jwt__Key: ${JWT_SECRET}
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - internal
+
+  ai-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.llm
+    container_name: ai-service
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    environment:
+      ConnectionStrings__DefaultConnection: ${DB_CONN}
+      ConnectionStrings__RedisConnection: ${REDIS_CONN}
+      Kafka__BootstrapServers: ${KAFKA_BOOTSTRAP_SERVERS}
+      ServiceName: AI
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - internal
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui
+    container_name: kafka-ui
+    ports:
+      - "${KAFKA_UI_PORT}:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - internal
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: ${ZOOKEEPER_PORT}
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "${ZOOKEEPER_PORT}:2181"
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper
+    healthcheck:
+      test: ["CMD", "echo", "ruok", "|", "nc", "localhost", "2181"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - internal
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "${KAFKA_PORT_INTERNAL}:9092"
+      - "${KAFKA_PORT_EXTERNAL}:9094"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: ${KAFKA_ZOOKEEPER_CONNECT}
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9094
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      ALLOW_PLAINTEXT_LISTENER: yes
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "9092"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    ports:
+      - "${PROMETHEUS_PORT}:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - internal
+  
+  grafana:
+    image: grafana/grafana
+    container_name: grafana
+    ports:
+      - "${GRAFANA_PORT}:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - internal
+
+networks:
+  internal:
+
+volumes:
+  zookeeper-data:
+  kafka-data:

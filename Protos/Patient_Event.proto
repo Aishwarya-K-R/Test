@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package patient;
+
+option csharp_namespace = "PatientEvent";
+
+message PatientEventRequest {
+    int32 patient_id = 1;
+    string event_type = 2;
+}

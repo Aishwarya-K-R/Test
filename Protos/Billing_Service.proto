@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package billing;
+
+option csharp_namespace = "BillingGrpc";
+
+service BillingService {
+  rpc CreateBillingAccount (BillingRequest) returns (BillingResponse);
+}
+
+message BillingRequest {
+  int32 patient_id = 1;
+}
+
+message BillingResponse {
+  string account_id = 1;
+  string status = 2;
+}

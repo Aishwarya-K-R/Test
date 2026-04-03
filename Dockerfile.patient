@@ -1,0 +1,24 @@
+# -------- Build stage --------
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+
+COPY PMS.csproj ./
+COPY . .
+
+RUN dotnet restore PMS.csproj
+
+RUN dotnet build PMS.csproj -c Release
+
+RUN dotnet publish PMS.csproj -c Release -o /app/publish
+
+# -------- Runtime stage --------
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+WORKDIR /app
+
+ENV ASPNETCORE_URLS=http://+:5244
+
+COPY --from=build /app/publish .
+
+EXPOSE 5244
+
+ENTRYPOINT ["dotnet", "PMS.dll"]
