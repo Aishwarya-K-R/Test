@@ -26,6 +26,10 @@
 - [ ] No raw SQL queries — all DB access goes through `AppDbContext`
 - [ ] Rate limiting is applied to any new public-facing endpoints
 
+### Security Checks
+- [ ] No PHI exposure or hardcoded secrets
+- [ ] [Authorize] added to new endpoints where required
+
 ### Database / EF Core
 - [ ] Model changes include a new EF Core migration (`dotnet ef migrations add`)
 - [ ] Migration has been reviewed for unintended schema changes
