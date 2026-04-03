@@ -743,7 +743,7 @@ def apply_auto_fixes(review: dict, security: dict, pr: dict) -> list:
                         fixed_lines = fixed.splitlines()
                         changed     = sum(1 for a, b in zip(orig_lines, fixed_lines) if a != b)
                         changed    += abs(len(fixed_lines) - len(orig_lines))
-                        if changed > 15:
+                        if changed > 60:
                             print(f"    → Skipped (change too large: {changed} lines)")
                         else:
                             working_content = fixed
