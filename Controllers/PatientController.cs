@@ -70,17 +70,5 @@ namespace Patient_Management_System.Controllers
             await _patientService.DeletePatientAsync(id);
             return Ok("Patient deleted successfully!!!");
         }
-
-        [Authorize]
-        [HttpPost("patient/{id}/discharge")]
-        public async Task<IActionResult> DischargePatient(int id, CancellationToken cancellationToken)
-        {
-            var dischargeReason = Request.Form["dischargeReason"];
-            if (string.IsNullOrWhiteSpace(dischargeReason))
-                return BadRequest("Discharge reason is required.");
-
-            var result = await _patientService.DischargePatientAsync(id, dischargeReason);
-            return Ok(result);
-        }
     }
 }
