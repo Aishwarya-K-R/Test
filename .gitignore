@@ -1,0 +1,91 @@
+# .NET Build Output
+bin/
+obj/
+publish/
+*.user
+*.suo
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.opendb
+*.VC.db
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+build/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+packages/
+!packages/repositories.config
+*.lock.json
+!packages.lock.json
+
+# Visual Studio
+.vs/
+*.vsp
+*.vspx
+TestResults/
+*.testlog
+*.trx
+
+# Rider / JetBrains
+.idea/
+*.sln.iml
+
+# VS Code
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Coverage reports
+coverage/
+*.coverage
+*.coveragexml
+lcov.info
+
+# Application logs (generated at runtime)
+**/logs/*.txt
+**/logs/*.log
+logs/
+
+# Docker data volumes (local dev only)
+**/db-data/
+**/zookeeper-data/
+**/zookeeper-datalog/
+
+# Environment / Secrets
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+secrets/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temp / misc
+*.tmp
+*.temp
+*.bak
+*.cache
+*.orig

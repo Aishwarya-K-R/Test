@@ -158,12 +158,23 @@ namespace Patient_Management_System.Services
             var existingPatient = await _context.Patients.FindAsync(id) ?? throw new PatientNotFoundException(id);
             _context.Patients.Remove(existingPatient);
             await _context.SaveChangesAsync();
-            
+
             await _kafkaProducer.PublishAsync(_config["Kafka:PatientDeletedTopic"], new { PatientId = id });
 
             // Invalidate caches
             _memoryCache.Remove($"Patient_{id}");
             await _redisCache.RemoveAsync($"Patient_{id}");
+        }
+
+        public async Task<object> DischargePatientAsync(int id, string dischargeReason)
+        {
+            var patient = await _context.Patients.FindAsync(id) ?? throw new PatientNotFoundException(id);
+
+            _logger.LogInformation($"Discharging patient {patient.Name} (ID: {id}) with reason: {dischargeReason}");
+
+            await _kafkaProducer.PublishAsync(_config["Kafka:PatientUpdatedTopic"], new { PatientId = id, Status = "Discharged", Reason = dischargeReason });
+
+            return new { PatientId = id, Status = "Discharged", DischargeReason = dischargeReason };
         }
     }
 }

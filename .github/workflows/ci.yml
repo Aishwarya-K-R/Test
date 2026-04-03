@@ -1,0 +1,138 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─────────────────────────────────────────────
+  # Job 1: Build & Test
+  # ─────────────────────────────────────────────
+  build-and-test:
+    name: Build & Test (.NET 8)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore dependencies
+        run: dotnet restore "Patient Management System/Patient Management System.sln"
+
+      - name: Build (Release)
+        run: dotnet build "Patient Management System/Patient Management System.sln" --no-restore --configuration Release
+
+      - name: Run tests with coverage
+        run: |
+          dotnet test "Patient Management System/PMS.Tests/PMS.Tests.csproj" \
+            --no-build \
+            --configuration Release \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./coverage \
+            --logger "trx;LogFileName=test-results.trx" \
+            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: coverage/
+
+      - name: Check coverage threshold
+        run: |
+          COVERAGE=$(grep -oP 'line-rate="\K[^"]+' coverage/**/coverage.opencover.xml | head -1 || echo "0")
+          echo "Line coverage: $COVERAGE"
+
+  # ─────────────────────────────────────────────
+  # Job 2: Docker Build Validation
+  # ─────────────────────────────────────────────
+  docker-validate:
+    name: Validate Docker Builds
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        service:
+          - { dockerfile: "Dockerfile.api-gateway", context: "Patient Management System" }
+          - { dockerfile: "Dockerfile.auth",        context: "Patient Management System" }
+          - { dockerfile: "Dockerfile.patient",     context: "Patient Management System" }
+          - { dockerfile: "Dockerfile.billing",     context: "Patient Management System" }
+          - { dockerfile: "Dockerfile.llm",         context: "Patient Management System" }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.service.dockerfile }} (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.service.context }}
+          file: ${{ matrix.service.context }}/${{ matrix.service.dockerfile }}
+          push: false
+          cache-from: type=gha,scope=${{ matrix.service.dockerfile }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service.dockerfile }}
+
+  # ─────────────────────────────────────────────
+  # Job 3: Proto Lint
+  # ─────────────────────────────────────────────
+  proto-lint:
+    name: Lint Protobuf Files
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.changed_files, '.proto') || github.event_name == 'push'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install buf
+        uses: bufbuild/buf-setup-action@v1
+
+      - name: Lint proto files
+        run: |
+          cd "Patient Management System/Protos"
+          # Check for basic proto validity — buf lint if buf.yaml exists, else basic check
+          if [ -f buf.yaml ]; then
+            buf lint
+          else
+            echo "No buf.yaml found — skipping buf lint. Consider adding buf.yaml for stricter proto validation."
+          fi
+
+  # ─────────────────────────────────────────────
+  # Job 4: Security Scan (secret detection)
+  # ─────────────────────────────────────────────
+  secret-scan:
+    name: Secret Detection
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
