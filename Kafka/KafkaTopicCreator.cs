@@ -46,6 +46,12 @@ namespace Patient_Management_System.Kafka
                         NumPartitions = 1,
                         ReplicationFactor = 1
                     },
+                    new TopicSpecification
+                    {
+                        Name = "patient-updated",
+                        NumPartitions = 1,
+                        ReplicationFactor = 3
+                    },
                 });
 
                 Console.WriteLine("Topic created successfully.");
