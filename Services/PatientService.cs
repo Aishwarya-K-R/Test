@@ -101,9 +101,18 @@ namespace Patient_Management_System.Services
         {
             if(patient == null || string.IsNullOrWhiteSpace(patient.Name) || string.IsNullOrWhiteSpace(patient.Address) || patient.DateOfBirth == default || patient.DateOfBirth >= DateOnly.FromDateTime(DateTime.Today) || patient.RegisteredDate == default || patient.RegisteredDate < patient.DateOfBirth)
             {
-                throw new ArgumentException("Invalid patient details!!!");
+                throw new ArgumentException("Invalid patient data.");
             }
 
+            await _context.AddAsync(patient, cancellationToken);
+            await _context.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("Patient with ID {PatientId} created.", patient.Id);
+
+            return patient;
         }
     }
 }
+
+// Run the migration command
+// dotnet ef migrations add AddDischargeFunctionality
