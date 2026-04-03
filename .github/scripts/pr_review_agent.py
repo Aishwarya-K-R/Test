@@ -738,17 +738,14 @@ def apply_auto_fixes(review: dict, security: dict, pr: dict) -> list:
                         issue["fix"],
                     )
                     if fixed and fixed.strip() != working_content.strip():
-                        # Safety gate: skip if change is too large (likely a full rewrite)
                         orig_lines  = working_content.splitlines()
                         fixed_lines = fixed.splitlines()
                         changed     = sum(1 for a, b in zip(orig_lines, fixed_lines) if a != b)
                         changed    += abs(len(fixed_lines) - len(orig_lines))
-                        if changed > 60:
-                            print(f"    → Skipped (change too large: {changed} lines)")
-                        else:
-                            working_content = fixed
-                            applied.append({"file": file_path, "title": issue["title"],
-                                            "severity": issue["severity"]})
+                        print(f"    → Applying fix ({changed} lines changed) — goes to fix PR for human review")
+                        working_content = fixed
+                        applied.append({"file": file_path, "title": issue["title"],
+                                        "severity": issue["severity"]})
                     else:
                         print(f"    → No change produced")
                 except Exception as e:
