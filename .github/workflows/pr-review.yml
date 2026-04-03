@@ -11,7 +11,7 @@ concurrency:
 
 permissions:
   pull-requests: write   # post review comments
-  contents: read         # read the diff
+  contents: write        # read diff + commit auto-fixes to PR branch
 
 jobs:
   ai-review:

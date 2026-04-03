@@ -546,6 +546,176 @@ def build_review_body(
     return "\n".join(lines)
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Auto-fix engine
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fetch_file_for_fix(path: str, ref: str) -> tuple:
+    """Returns (content, sha) for a file at a given ref."""
+    import base64
+    r = gh_get(f"/repos/{REPO_FULL_NAME}/contents/{path}?ref={ref}")
+    data = r.json()
+    content = base64.b64decode(data["content"]).decode("utf-8")
+    return content, data["sha"]
+
+
+def ai_apply_fix(file_content: str, issue_title: str, issue_description: str, suggested_fix: str) -> str:
+    """Ask GPT-4o to apply a specific fix to the full file. Returns fixed file content."""
+    client = OpenAI(
+        base_url="https://models.inference.ai.azure.com",
+        api_key=GH_MODELS_TOKEN,
+    )
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        max_tokens=6000,
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are a precise .NET code editor. Apply the requested fix to the file. "
+                    "Return ONLY the complete fixed file content — no explanation, no markdown, "
+                    "no code fences. Preserve all existing code exactly except for the fix."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Issue: {issue_title}\n"
+                    f"Description: {issue_description}\n"
+                    f"Fix to apply: {suggested_fix}\n\n"
+                    f"File content:\n{file_content[:5000]}\n\n"
+                    "Return the complete fixed file content only."
+                ),
+            },
+        ],
+    )
+    return response.choices[0].message.content.strip()
+
+
+def commit_fix(path: str, content: str, sha: str, message: str, branch: str):
+    """Commit a single file update to the PR branch via GitHub Contents API."""
+    import base64
+    url = f"{GITHUB_API}/repos/{REPO_FULL_NAME}/contents/{path}"
+    payload = {
+        "message": message,
+        "content": base64.b64encode(content.encode("utf-8")).decode("utf-8"),
+        "sha": sha,
+        "branch": branch,
+    }
+    r = requests.put(url, headers=GH_HEADERS, json=payload, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
+def apply_auto_fixes(review: dict, security: dict, pr_branch: str, pr_head_sha: str) -> list:
+    """
+    Apply high-confidence fixes directly to the PR branch.
+    Only fixes issues that have a non-null 'fix' field and a valid 'file' path.
+    Returns list of successfully applied fixes.
+    """
+    # Collect fixable issues from both review and security
+    candidates = []
+    for issue in (review.get("critical_issues") or []):
+        if issue.get("fix") and issue.get("file"):
+            candidates.append({"title": issue["title"], "description": issue["description"],
+                                "file": issue["file"], "fix": issue["fix"], "severity": "critical"})
+    for issue in (review.get("suggestions") or []):
+        if issue.get("fix") and issue.get("file"):
+            candidates.append({"title": issue["title"], "description": issue["description"],
+                                "file": issue["file"], "fix": issue["fix"], "severity": "suggestion"})
+
+    if not candidates:
+        print("  Auto-fix: no fixable issues found.")
+        return []
+
+    # Group by file so we fetch each file only once
+    by_file: dict = {}
+    for c in candidates:
+        by_file.setdefault(c["file"], []).append(c)
+
+    applied = []
+    current_sha = pr_head_sha
+
+    for file_path, issues in by_file.items():
+        try:
+            content, sha = fetch_file_for_fix(file_path, current_sha)
+            working_content = content
+
+            for issue in issues:
+                print(f"  Auto-fixing [{issue['severity']}]: {issue['title']} → {file_path}")
+                try:
+                    fixed = ai_apply_fix(
+                        working_content,
+                        issue["title"],
+                        issue["description"],
+                        issue["fix"],
+                    )
+                    if fixed and fixed.strip() != working_content.strip():
+                        working_content = fixed
+                        applied.append({"file": file_path, "title": issue["title"],
+                                        "severity": issue["severity"]})
+                    else:
+                        print(f"    → No change produced for: {issue['title']}")
+                except Exception as e:
+                    print(f"    → Skipped '{issue['title']}': {e}")
+
+            # Only commit if content actually changed
+            if working_content.strip() != content.strip():
+                titles = ", ".join(i["title"] for i in issues if any(
+                    a["file"] == file_path and a["title"] == i["title"] for a in applied))
+                result = commit_fix(
+                    file_path,
+                    working_content,
+                    sha,
+                    f"[auto-fix] {titles or file_path}",
+                    pr_branch,
+                )
+                # Update sha reference so next file fetch uses latest commit
+                current_sha = result["commit"]["sha"]
+
+        except Exception as e:
+            print(f"  Warning: Could not auto-fix {file_path}: {e}")
+
+    return applied
+
+
+def post_autofix_comment(applied_fixes: list):
+    """Post a PR comment summarising what the agent auto-fixed."""
+    if not applied_fixes:
+        return
+
+    critical = [f for f in applied_fixes if f["severity"] == "critical"]
+    suggestions = [f for f in applied_fixes if f["severity"] == "suggestion"]
+
+    lines = [
+        "## 🤖 Auto-fix Applied by PMS AI Agent",
+        "",
+        f"The agent automatically fixed **{len(applied_fixes)} issue(s)** directly on this branch:",
+        "",
+    ]
+    if critical:
+        lines.append("**Critical fixes:**")
+        for f in critical:
+            lines.append(f"- ✅ `{f['file']}` — {f['title']}")
+        lines.append("")
+    if suggestions:
+        lines.append("**Suggestion fixes:**")
+        for f in suggestions:
+            lines.append(f"- ✅ `{f['file']}` — {f['title']}")
+        lines.append("")
+
+    lines += [
+        "> ⚠️ **Please review the auto-fix commit** before merging — AI-generated changes should always be verified.",
+        "",
+        "*Applied by **PMS AI Agent v2***",
+    ]
+
+    url = f"{GITHUB_API}/repos/{REPO_FULL_NAME}/issues/{PR_NUMBER}/comments"
+    r = requests.post(url, headers=GH_HEADERS, json={"body": "\n".join(lines)}, timeout=30)
+    r.raise_for_status()
+    print(f"  Auto-fix comment posted.")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Post GitHub review
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -657,11 +827,26 @@ def main():
     with open("pr_review_output.json", "w") as f:
         json.dump(output, f, indent=2)
 
-    # Post review
+    # Post review comment
     post_github_review(
         pr, review, security, migration_warnings,
         impacted_services, risk_label, risk_emoji, score, files
     )
+
+    # Auto-fix engine — apply high-confidence fixes directly to the PR branch
+    pr_branch = pr["head"]["ref"]
+    print(f"\n  Running auto-fix engine on branch: {pr_branch}")
+    applied_fixes = apply_auto_fixes(review, security, pr_branch, pr["head"]["sha"])
+    if applied_fixes:
+        print(f"  Auto-fixed {len(applied_fixes)} issue(s)")
+        post_autofix_comment(applied_fixes)
+    else:
+        print("  Auto-fix: nothing applied")
+
+    # Update output artifact with fix info
+    output["auto_fixes_applied"] = applied_fixes
+    with open("pr_review_output.json", "w") as f:
+        json.dump(output, f, indent=2)
 
     print("=" * 60)
 
@@ -673,7 +858,8 @@ def main():
         or migration_warnings
     )
     if has_critical:
-        print("[FAIL] Critical issues found — PR needs fixes before merge.")
+        remaining = len(has_critical) - len(applied_fixes) if isinstance(has_critical, list) else True
+        print("[FAIL] Critical issues found — check auto-fix commit and remaining issues.")
         sys.exit(1)
 
     print(f"[PASS] Score: {score}/100 — PR looks good!")
