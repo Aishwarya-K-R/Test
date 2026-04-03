@@ -41,7 +41,7 @@ GH_HEADERS  = {
     "Accept": "application/vnd.github.v3+json",
     "X-GitHub-Api-Version": "2022-11-28",
 }
-MAX_DIFF_CHARS = 80_000
+MAX_DIFF_CHARS = 16_000   # GitHub Models free tier: 8k token limit per request
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Microservice impact map
@@ -397,9 +397,24 @@ def call_model(system: str, user: str) -> dict:
         raise ValueError(f"Model response not valid JSON:\n{raw[:600]}")
 
 
+def extract_added_lines(diff: str) -> str:
+    """Extract only added (+) lines from diff to minimize token usage."""
+    lines = []
+    current_file = ""
+    for line in diff.splitlines():
+        if line.startswith("diff --git"):
+            m = re.search(r"b/(.+)$", line)
+            if m:
+                current_file = m.group(1)
+        elif line.startswith("+") and not line.startswith("+++"):
+            lines.append(f"{current_file}: {line[1:].strip()}")
+    return "\n".join(lines[:400])   # cap at 400 added lines
+
+
 def run_security_pass(diff: str) -> dict:
     print("  [Pass 1] Security & PHI scan...")
-    return call_model(SECURITY_PASS_PROMPT, f"Scan this diff for security issues:\n\n```diff\n{diff}\n```")
+    added_only = extract_added_lines(diff)
+    return call_model(SECURITY_PASS_PROMPT, f"Scan these added lines for security issues:\n\n{added_only}")
 
 
 def run_full_review(pr: dict, files: list, diff: str, context: str, security: dict) -> dict:
@@ -408,7 +423,12 @@ def run_full_review(pr: dict, files: list, diff: str, context: str, security: di
         f"  {f['status']:8s}  +{f['additions']:<4} -{f['deletions']:<4}  {f['filename']}"
         for f in files
     )
-    security_summary = json.dumps(security, indent=2)
+    # Keep security summary compact to save tokens
+    security_summary = json.dumps({
+        "phi_risks":      security.get("phi_risks") or [],
+        "auth_gaps":      security.get("auth_gaps") or [],
+        "other_security": security.get("other_security") or [],
+    })
     user_msg = f"""Review this pull request for the Patient Management System.
 
 ## PR
