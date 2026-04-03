@@ -922,19 +922,7 @@ def main():
         impacted_services, risk_label, risk_emoji, score, files
     )
 
-    # Auto-fix engine — commit fixes to a separate branch and raise a fix PR
-    print(f"\n  Running auto-fix engine...")
-    applied_fixes = apply_auto_fixes(review, security, pr)
-    if applied_fixes:
-        print(f"  Auto-fixed {len(applied_fixes)} issue(s)")
-        fix_branch = f"auto-fix/pr-{PR_NUMBER}"
-        fix_pr_url = raise_fix_pr(pr, fix_branch, applied_fixes)
-        post_autofix_comment(pr, fix_pr_url, applied_fixes)
-    else:
-        print("  Auto-fix: nothing applied")
-
-    # Update output artifact with fix info
-    output["auto_fixes_applied"] = applied_fixes
+    # Update output artifact
     with open("pr_review_output.json", "w") as f:
         json.dump(output, f, indent=2)
 
@@ -948,8 +936,7 @@ def main():
         or migration_warnings
     )
     if has_critical:
-        remaining = len(has_critical) - len(applied_fixes) if isinstance(has_critical, list) else True
-        print("[FAIL] Critical issues found — check auto-fix commit and remaining issues.")
+        print("[FAIL] Critical issues found — address the suggestions in the review comment above.")
         sys.exit(1)
 
     print(f"[PASS] Score: {score}/100 — PR looks good!")
