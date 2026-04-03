@@ -614,12 +614,15 @@ def apply_auto_fixes(review: dict, security: dict, pr_branch: str, pr_head_sha: 
     """
     # Collect fixable issues from both review and security
     candidates = []
+    def is_valid_file(f):
+        return f and isinstance(f, str) and f.lower() not in ("none", "null", "") and "/" in f or f and f.endswith(".cs")
+
     for issue in (review.get("critical_issues") or []):
-        if issue.get("fix") and issue.get("file"):
+        if issue.get("fix") and is_valid_file(issue.get("file")):
             candidates.append({"title": issue["title"], "description": issue["description"],
                                 "file": issue["file"], "fix": issue["fix"], "severity": "critical"})
     for issue in (review.get("suggestions") or []):
-        if issue.get("fix") and issue.get("file"):
+        if issue.get("fix") and is_valid_file(issue.get("file")):
             candidates.append({"title": issue["title"], "description": issue["description"],
                                 "file": issue["file"], "fix": issue["fix"], "severity": "suggestion"})
 
