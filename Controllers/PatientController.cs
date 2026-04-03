@@ -73,8 +73,9 @@ namespace Patient_Management_System.Controllers
 
         [Authorize]
         [HttpPost("patient/{id}/discharge")]
-        public async Task<ActionResult> DischargePatient(int id, [FromBody] string dischargeReason)
+        public async Task<IActionResult> DischargePatientAsync(int id, CancellationToken cancellationToken)
         {
+            var dischargeReason = Request.Form["dischargeReason"];
             if (string.IsNullOrWhiteSpace(dischargeReason))
                 return BadRequest("Discharge reason is required.");
 
