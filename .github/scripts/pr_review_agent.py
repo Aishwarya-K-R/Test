@@ -2,14 +2,13 @@
 """
 Patient Management System — AI PR Review Agent
 -----------------------------------------------
-Fetches a GitHub PR diff, sends it to Claude with deep project context,
-and posts a structured review (summary + inline comments) back to the PR.
+Fetches a GitHub PR diff, sends it to GitHub Models (gpt-4o) — free, no API key needed.
+Uses GITHUB_TOKEN which is automatically provided by GitHub Actions.
 
 Required env vars:
-  ANTHROPIC_API_KEY  — Anthropic API key
-  GITHUB_TOKEN       — GitHub token with pull-requests:write
-  PR_NUMBER          — PR number (set by GitHub Actions)
-  REPO_FULL_NAME     — e.g. "yourorg/patient-management-system"
+  GITHUB_TOKEN   — automatically provided by GitHub Actions
+  PR_NUMBER      — PR number (set by GitHub Actions)
+  REPO_FULL_NAME — e.g. "yourorg/patient-management-system"
 """
 
 import os
@@ -17,16 +16,15 @@ import re
 import sys
 import json
 import requests
-import anthropic
+from openai import OpenAI
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 
-ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
-GITHUB_TOKEN      = os.environ["GITHUB_TOKEN"]
-PR_NUMBER         = os.environ["PR_NUMBER"]
-REPO_FULL_NAME    = os.environ["REPO_FULL_NAME"]
+GITHUB_TOKEN   = os.environ["GITHUB_TOKEN"]
+PR_NUMBER      = os.environ["PR_NUMBER"]
+REPO_FULL_NAME = os.environ["REPO_FULL_NAME"]
 
 GITHUB_API = "https://api.github.com"
 GH_HEADERS = {
@@ -211,11 +209,14 @@ def trim_diff(diff: str, max_chars: int = MAX_DIFF_CHARS) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Claude review
+# GitHub Models review (free — uses GITHUB_TOKEN)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run_ai_review(pr: dict, files: list, diff: str) -> dict:
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    client = OpenAI(
+        base_url="https://models.inference.ai.azure.com",
+        api_key=GITHUB_TOKEN,
+    )
 
     files_summary = "\n".join(
         f"  {f['status']:8s}  +{f['additions']:<4} -{f['deletions']:<4}  {f['filename']}"
@@ -240,17 +241,19 @@ def run_ai_review(pr: dict, files: list, diff: str) -> dict:
 ```
 """
 
-    print("Sending diff to Claude for review...")
-    response = client.messages.create(
-        model="claude-sonnet-4-6",
+    print("Sending diff to GitHub Models (gpt-4o) for review...")
+    response = client.chat.completions.create(
+        model="gpt-4o",
         max_tokens=4096,
-        system=PROJECT_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_message}],
+        messages=[
+            {"role": "system", "content": PROJECT_SYSTEM_PROMPT},
+            {"role": "user",   "content": user_message},
+        ],
     )
 
-    raw = response.content[0].text.strip()
+    raw = response.choices[0].message.content.strip()
 
-    # Parse JSON — handle cases where Claude wraps it in a code block
+    # Parse JSON — handle cases where model wraps it in a code block
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
@@ -260,7 +263,7 @@ def run_ai_review(pr: dict, files: list, diff: str) -> dict:
         m = re.search(r"\{[\s\S]*\}", raw)
         if m:
             return json.loads(m.group())
-        raise ValueError(f"Claude response is not valid JSON:\n{raw[:800]}")
+        raise ValueError(f"Model response is not valid JSON:\n{raw[:800]}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -321,7 +324,7 @@ def build_review_body(review: dict) -> str:
 
     lines += [
         "---",
-        "*Automated review by [Claude AI](https://claude.ai) · "
+        "*Automated review by GitHub Models (gpt-4o) · "
         "[View workflow](../../actions/workflows/pr-review.yml)*",
     ]
     return "\n".join(lines)
