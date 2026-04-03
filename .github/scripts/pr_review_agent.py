@@ -607,13 +607,20 @@ def commit_fix(path: str, content: str, sha: str, message: str, branch: str):
 
 
 def create_fix_branch(base_sha: str, fix_branch: str):
-    """Create a new branch from base_sha for the fix PR."""
+    """Create a new branch from base_sha for the fix PR. If it already exists, reset it to base_sha."""
     url = f"{GITHUB_API}/repos/{REPO_FULL_NAME}/git/refs"
     r = requests.post(url, headers=GH_HEADERS, json={
         "ref": f"refs/heads/{fix_branch}",
         "sha": base_sha,
     }, timeout=30)
-    r.raise_for_status()
+    if r.status_code == 422:
+        # Branch already exists — force-update it to the current base SHA
+        patch_url = f"{GITHUB_API}/repos/{REPO_FULL_NAME}/git/refs/heads/{fix_branch}"
+        r2 = requests.patch(patch_url, headers=GH_HEADERS, json={"sha": base_sha, "force": True}, timeout=30)
+        r2.raise_for_status()
+        print(f"  Fix branch '{fix_branch}' already existed — reset to base SHA.")
+    else:
+        r.raise_for_status()
 
 
 def raise_fix_pr(pr: dict, fix_branch: str, applied_fixes: list) -> str:
@@ -655,7 +662,20 @@ def raise_fix_pr(pr: dict, fix_branch: str, applied_fixes: list) -> str:
         "head": fix_branch,
         "base": pr["head"]["ref"],   # fix PR targets the feature branch, not main
     }, timeout=30)
-    r.raise_for_status()
+    if r.status_code == 422:
+        # PR already exists — find and return its URL
+        existing = requests.get(
+            f"{GITHUB_API}/repos/{REPO_FULL_NAME}/pulls",
+            headers=GH_HEADERS,
+            params={"head": f"{REPO_FULL_NAME.split('/')[0]}:{fix_branch}", "state": "open"},
+            timeout=30,
+        ).json()
+        if existing:
+            print(f"  Fix PR already exists: {existing[0]['html_url']}")
+            return existing[0]["html_url"]
+        r.raise_for_status()
+    else:
+        r.raise_for_status()
     return r.json()["html_url"]
 
 
