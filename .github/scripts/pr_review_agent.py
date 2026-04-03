@@ -22,9 +22,10 @@ from openai import OpenAI
 # Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 
-GITHUB_TOKEN   = os.environ["GITHUB_TOKEN"]
-PR_NUMBER      = os.environ["PR_NUMBER"]
-REPO_FULL_NAME = os.environ["REPO_FULL_NAME"]
+GITHUB_TOKEN    = os.environ["GITHUB_TOKEN"]
+GH_MODELS_TOKEN = os.environ["GH_MODELS_TOKEN"]
+PR_NUMBER       = os.environ["PR_NUMBER"]
+REPO_FULL_NAME  = os.environ["REPO_FULL_NAME"]
 
 GITHUB_API = "https://api.github.com"
 GH_HEADERS = {
@@ -215,7 +216,7 @@ def trim_diff(diff: str, max_chars: int = MAX_DIFF_CHARS) -> str:
 def run_ai_review(pr: dict, files: list, diff: str) -> dict:
     client = OpenAI(
         base_url="https://models.inference.ai.azure.com",
-        api_key=GITHUB_TOKEN,
+        api_key=GH_MODELS_TOKEN,
     )
 
     files_summary = "\n".join(
