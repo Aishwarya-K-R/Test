@@ -9,6 +9,11 @@ using Patient_Management_System.Models;
 
 namespace Patient_Management_System.Services
 {
+    public static class KafkaTopics
+    {
+        public const string PatientUpdatedTopic = "PatientUpdatedTopic";
+    }
+
     public class PatientService(AppDbContext context, IMemoryCache memoryCache, IDistributedCache redisCache, KafkaProducer kafkaProducer, ILogger<PatientService> logger, IConfiguration config, RedisService redis, ContextService contextService)
     {
         private readonly AppDbContext _context = context;
@@ -93,88 +98,12 @@ namespace Patient_Management_System.Services
             return patientById;
         }
 
-        public async Task<Patient> CreatePatientAsync(Patient patient)
+        public async Task<Patient> CreatePatientAsync(Patient patient, CancellationToken cancellationToken)
         {
             if(patient == null || string.IsNullOrWhiteSpace(patient.Name) || string.IsNullOrWhiteSpace(patient.Address) || patient.DateOfBirth == default || patient.DateOfBirth >= DateOnly.FromDateTime(DateTime.Today) || patient.RegisteredDate == default || patient.RegisteredDate < patient.DateOfBirth)
             {
                 throw new ArgumentException("Invalid patient details!!!");
             }
 
-            var patientByEmail = await _context.Patients.FirstOrDefaultAsync(p => p.Email.ToLower() == patient.Email.ToLower());
-            if(patientByEmail != null)
-            {
-                throw new DuplicateEmailException(patient.Email);
-            }   
-
-            var newPatient = new Patient
-            {
-                Name = patient.Name,
-                Email = patient.Email,
-                Address = patient.Address,
-                DateOfBirth = patient.DateOfBirth,
-                RegisteredDate = patient.RegisteredDate
-            };
-
-            _context.Patients.Add(newPatient);
-            await _context.SaveChangesAsync();
-            await _kafkaProducer.PublishAsync(_config["Kafka:PatientCreatedTopic"], new { PatientId = newPatient.Id });
-            return newPatient;
-        }
-
-        public async Task<Patient> UpdatePatientAsync(int id, Patient patient)
-        {
-            var existingPatient = await _context.Patients.FindAsync(id) ?? throw new PatientNotFoundException(id);
-
-            if(patient == null || string.IsNullOrWhiteSpace(patient.Name) || string.IsNullOrWhiteSpace(patient.Address) || patient.DateOfBirth == default || patient.DateOfBirth >= DateOnly.FromDateTime(DateTime.Today) || patient.RegisteredDate == default || patient.RegisteredDate < patient.DateOfBirth)
-            {
-                throw new ArgumentException("Invalid patient details!!!");
-            }
-
-            var patientByEmail = await _context.Patients.FirstOrDefaultAsync(p => p.Email.ToLower() == patient.Email.ToLower() && p.Id != id);
-            if(patientByEmail != null)
-            {
-                throw new DuplicateEmailException(patient.Email);
-            }   
-
-            existingPatient.Name = patient.Name;
-            existingPatient.Email = patient.Email;
-            existingPatient.Address = patient.Address;
-            existingPatient.DateOfBirth = patient.DateOfBirth;
-            existingPatient.RegisteredDate = patient.RegisteredDate;
-
-            await _context.SaveChangesAsync();
-
-            await _kafkaProducer.PublishAsync(_config["Kafka:PatientUpdatedTopic"], new { PatientId = id });
-
-            // Invalidate caches
-            _memoryCache.Remove($"Patient_{id}");
-            await _redisCache.RemoveAsync($"Patient_{id}");
-
-            return existingPatient;
-        }
-
-        public async Task DeletePatientAsync(int id)
-        {
-            var existingPatient = await _context.Patients.FindAsync(id) ?? throw new PatientNotFoundException(id);
-            _context.Patients.Remove(existingPatient);
-            await _context.SaveChangesAsync();
-
-            await _kafkaProducer.PublishAsync(_config["Kafka:PatientDeletedTopic"], new { PatientId = id });
-
-            // Invalidate caches
-            _memoryCache.Remove($"Patient_{id}");
-            await _redisCache.RemoveAsync($"Patient_{id}");
-        }
-
-        public async Task<object> DischargePatientAsync(int id, string dischargeReason)
-        {
-            var patient = await _context.Patients.FindAsync(id) ?? throw new PatientNotFoundException(id);
-
-            _logger.LogInformation($"Discharging patient {patient.Name} (ID: {id}) with reason: {dischargeReason}");
-
-            await _kafkaProducer.PublishAsync(_config["Kafka:PatientUpdatedTopic"], new { PatientId = id, Status = "Discharged", Reason = dischargeReason });
-
-            return new { PatientId = id, Status = "Discharged", DischargeReason = dischargeReason };
-        }
-    }
-}
+            var patientByEmail = await _context.Patients.FirstOrDefaultAsync(p => p.Email.ToLower() == patient.Email.ToLower(), cancellationToken);
+            if(patientByEmail != nu
