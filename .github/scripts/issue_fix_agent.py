@@ -38,6 +38,7 @@ from openai import OpenAI
 
 GITHUB_TOKEN    = os.environ["GITHUB_TOKEN"]
 GH_MODELS_TOKEN = os.environ["GH_MODELS_TOKEN"]
+PAT_TOKEN       = os.environ.get("PAT_TOKEN", GITHUB_TOKEN)  # used for trigger commit to fire pull_request events
 ISSUE_NUMBER    = os.environ["ISSUE_NUMBER"]
 ISSUE_TITLE     = os.environ["ISSUE_TITLE"]
 ISSUE_BODY      = os.environ.get("ISSUE_BODY", "")
@@ -186,20 +187,29 @@ def comment_on_issue(message: str):
 
 
 def trigger_pr_review(fix_branch: str, pr_number: str):
-    """Push an empty commit to the fix branch to trigger the PR Review Agent."""
+    """Push an empty commit using PAT_TOKEN so GitHub fires pull_request events."""
+    pat_headers = {
+        "Authorization": f"Bearer {PAT_TOKEN}",
+        "Accept": "application/vnd.github.v3+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
     try:
         # Get latest commit SHA on the fix branch
-        r = gh_get(f"/repos/{REPO_FULL_NAME}/git/refs/heads/{fix_branch}")
+        r = requests.get(f"{GITHUB_API}/repos/{REPO_FULL_NAME}/git/refs/heads/{fix_branch}",
+                         headers=pat_headers, timeout=30)
+        r.raise_for_status()
         branch_sha = r.json()["object"]["sha"]
 
         # Get the tree SHA of that commit
-        commit_r = gh_get(f"/repos/{REPO_FULL_NAME}/git/commits/{branch_sha}")
+        commit_r = requests.get(f"{GITHUB_API}/repos/{REPO_FULL_NAME}/git/commits/{branch_sha}",
+                                headers=pat_headers, timeout=30)
+        commit_r.raise_for_status()
         tree_sha = commit_r.json()["tree"]["sha"]
 
-        # Create an empty commit
+        # Create an empty commit using PAT
         new_commit = requests.post(
             f"{GITHUB_API}/repos/{REPO_FULL_NAME}/git/commits",
-            headers=GH_HEADERS,
+            headers=pat_headers,
             json={
                 "message": "chore: trigger PR review agent",
                 "tree": tree_sha,
@@ -210,15 +220,15 @@ def trigger_pr_review(fix_branch: str, pr_number: str):
         new_commit.raise_for_status()
         new_sha = new_commit.json()["sha"]
 
-        # Update the branch ref to the new commit
+        # Update the branch ref using PAT
         requests.patch(
             f"{GITHUB_API}/repos/{REPO_FULL_NAME}/git/refs/heads/{fix_branch}",
-            headers=GH_HEADERS,
+            headers=pat_headers,
             json={"sha": new_sha},
             timeout=30,
         ).raise_for_status()
 
-        print(f"  Triggered PR Review Agent on PR #{pr_number}.")
+        print(f"  Triggered PR Review Agent on PR #{pr_number} via PAT.")
     except Exception as e:
         print(f"  Warning: could not trigger PR Review Agent: {e}")
 
