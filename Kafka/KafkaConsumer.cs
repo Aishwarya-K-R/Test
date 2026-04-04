@@ -1,7 +1,9 @@
+```csharp
 using System.Text.Json;
 using Confluent.Kafka;
 using Patient_Management_System.Services;
 using PatientEvent;
+using Serilog;
 
 namespace Patient_Management_System.Kafka
 {
@@ -23,19 +25,27 @@ namespace Patient_Management_System.Kafka
             {
                 using var consumer = new ConsumerBuilder<string, string>(consumerConfig).Build();
 
-                consumer.Subscribe( _config["Kafka:PatientCreatedTopic"]);
+                consumer.Subscribe(_config["Kafka:PatientCreatedTopic"]);
 
                 try
                 {
                     while (!stoppingToken.IsCancellationRequested)
                     {
-                        var result = consumer.Consume(stoppingToken);
+                        try
+                        {
+                            var result = consumer.Consume(stoppingToken);
 
-                        Console.WriteLine($"Received Patient Event: {result.Message.Value}");
+                            Console.WriteLine($"Received Patient Event: {result.Message.Value}");
 
-                        var patientEvent = JsonSerializer.Deserialize<PatientEventRequest>(result.Message.Value);
+                            var patientEvent = JsonSerializer.Deserialize<PatientEventRequest>(result.Message.Value);
 
-                        await _billingClient.CreateBillingAccountAsync(patientEvent.PatientId);
+                            await _billingClient.CreateBillingAccountAsync(patientEvent.PatientId);
+                        }
+                        catch (JsonException ex)
+                        {
+                            Log.Error(ex, "Failed to deserialize Kafka message: {Message}", ex.Message);
+                            // Log error and continue to the next message
+                        }
                     }
                 }
                 catch (OperationCanceledException)
@@ -47,3 +57,4 @@ namespace Patient_Management_System.Kafka
         }
     }
 }
+```
