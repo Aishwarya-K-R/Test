@@ -201,7 +201,7 @@ def trigger_pr_review(fix_branch: str, pr_number: str):
             f"{GITHUB_API}/repos/{REPO_FULL_NAME}/git/commits",
             headers=GH_HEADERS,
             json={
-                "message": "chore: trigger PR review agent [skip ci]",
+                "message": "chore: trigger PR review agent",
                 "tree": tree_sha,
                 "parents": [branch_sha],
             },
