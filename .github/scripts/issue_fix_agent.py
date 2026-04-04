@@ -337,14 +337,14 @@ Your task:
 1. Understand the bug
 2. Apply a minimal, targeted fix — only change what is necessary
 3. Do NOT rewrite the entire file
-4. Return the complete fixed file content
 
-Return ONLY valid JSON, no prose:
-{
-  "fixed_content": "<complete fixed file content>",
-  "summary": "<1-2 sentence explanation of what was changed and why>",
-  "confidence": "high|medium|low"
-}
+Return your response in this EXACT format with these exact markers — do not use JSON:
+
+SUMMARY: <1-2 sentence explanation of what was changed and why>
+CONFIDENCE: high|medium|low
+FIXED_FILE_START
+<complete fixed file content here>
+FIXED_FILE_END
 """
 
 def generate_fix(issue: dict, file_path: str, file_content: str) -> dict:
@@ -367,7 +367,7 @@ def generate_fix(issue: dict, file_path: str, file_content: str) -> dict:
 {file_content[:12000]}
 ```
 
-Apply a minimal, targeted fix and return the complete fixed file content as JSON.
+Apply a minimal, targeted fix. Use the exact format with SUMMARY, CONFIDENCE, FIXED_FILE_START and FIXED_FILE_END markers.
 """
 
     response = client.chat.completions.create(
@@ -380,16 +380,20 @@ Apply a minimal, targeted fix and return the complete fixed file content as JSON
     )
 
     raw = response.choices[0].message.content.strip()
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        m = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", raw)
-        if m:
-            return json.loads(m.group(1))
-        m = re.search(r"\{[\s\S]*\}", raw)
-        if m:
-            return json.loads(m.group())
-        raise ValueError(f"Model response not valid JSON:\n{raw[:400]}")
+
+    # Parse using markers — avoids JSON escaping issues with C# code
+    summary_m    = re.search(r"SUMMARY:\s*(.+)", raw)
+    confidence_m = re.search(r"CONFIDENCE:\s*(high|medium|low)", raw, re.IGNORECASE)
+    content_m    = re.search(r"FIXED_FILE_START\s*([\s\S]*?)\s*FIXED_FILE_END", raw)
+
+    if not content_m:
+        raise ValueError(f"Could not find FIXED_FILE_START/END markers in response:\n{raw[:400]}")
+
+    return {
+        "fixed_content": content_m.group(1),
+        "summary":       summary_m.group(1).strip() if summary_m else "Fix applied.",
+        "confidence":    confidence_m.group(1).lower() if confidence_m else "medium",
+    }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Slug helper
