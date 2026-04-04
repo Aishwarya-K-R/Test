@@ -27,7 +27,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Patient Management System.csproj" />
+    <ProjectReference Include="..\PMS.csproj" />
   </ItemGroup>
 
   <ItemGroup>

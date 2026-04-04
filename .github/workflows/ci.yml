@@ -2,7 +2,7 @@ name: CI
 
 on:
   pull_request:
-    branches: [main, develop]
+    branches: [main]
   push:
     branches: [main]
 
@@ -35,13 +35,23 @@ jobs:
           restore-keys: nuget-${{ runner.os }}-
 
       - name: Restore dependencies
-        run: dotnet restore "PMS.csproj"
+        run: |
+          dotnet restore "PMS.csproj"
+          dotnet restore "PMS.Tests/PMS.Tests.csproj"
 
       - name: Build (Release)
         run: dotnet build "PMS.csproj" --no-restore --configuration Release
 
       - name: Run tests with coverage
-        run: echo "Tests skipped for now"
+        run: dotnet test "PMS.Tests/PMS.Tests.csproj" --configuration Release --logger "trx;LogFileName=test-results.trx" --collect:"XPlat Code Coverage"
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: PMS.Tests/TestResults/
+          if-no-files-found: ignore
 
   # ─────────────────────────────────────────────
   # Job 2: Docker Build Validation
