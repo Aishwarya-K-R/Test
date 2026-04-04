@@ -184,6 +184,44 @@ def comment_on_issue(message: str):
         timeout=30,
     ).raise_for_status()
 
+
+def trigger_pr_review(fix_branch: str, pr_number: str):
+    """Push an empty commit to the fix branch to trigger the PR Review Agent."""
+    try:
+        # Get latest commit SHA on the fix branch
+        r = gh_get(f"/repos/{REPO_FULL_NAME}/git/refs/heads/{fix_branch}")
+        branch_sha = r.json()["object"]["sha"]
+
+        # Get the tree SHA of that commit
+        commit_r = gh_get(f"/repos/{REPO_FULL_NAME}/git/commits/{branch_sha}")
+        tree_sha = commit_r.json()["tree"]["sha"]
+
+        # Create an empty commit
+        new_commit = requests.post(
+            f"{GITHUB_API}/repos/{REPO_FULL_NAME}/git/commits",
+            headers=GH_HEADERS,
+            json={
+                "message": "chore: trigger PR review agent [skip ci]",
+                "tree": tree_sha,
+                "parents": [branch_sha],
+            },
+            timeout=30,
+        )
+        new_commit.raise_for_status()
+        new_sha = new_commit.json()["sha"]
+
+        # Update the branch ref to the new commit
+        requests.patch(
+            f"{GITHUB_API}/repos/{REPO_FULL_NAME}/git/refs/heads/{fix_branch}",
+            headers=GH_HEADERS,
+            json={"sha": new_sha},
+            timeout=30,
+        ).raise_for_status()
+
+        print(f"  Triggered PR Review Agent on PR #{pr_number}.")
+    except Exception as e:
+        print(f"  Warning: could not trigger PR Review Agent: {e}")
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Issue parsing
 # ─────────────────────────────────────────────────────────────────────────────
@@ -444,7 +482,11 @@ def main():
     pr_url = raise_pr(fix_branch, file_path, summary)
     print(f"  Fix PR: {pr_url}")
 
-    # Step 8 — Comment on issue
+    # Step 8 — Trigger PR Review Agent automatically
+    fix_pr_number = pr_url.rstrip("/").split("/")[-1]
+    trigger_pr_review(fix_branch, fix_pr_number)
+
+    # Step 10 — Comment on issue
     comment_on_issue("\n".join([
         "## 🤖 AI Fix Agent — Fix PR Raised",
         "",
