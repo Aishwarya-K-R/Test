@@ -32,8 +32,20 @@ from openai import OpenAI
 
 GITHUB_TOKEN    = os.environ["GITHUB_TOKEN"]
 GH_MODELS_TOKEN = os.environ["GH_MODELS_TOKEN"]
-PR_NUMBER       = os.environ["PR_NUMBER"]
 REPO_FULL_NAME  = os.environ["REPO_FULL_NAME"]
+
+# When triggered via workflow_run, PR info comes from the artifact file
+_fix_pr_info_file = os.environ.get("FIX_PR_INFO_FILE", "")
+if _fix_pr_info_file and os.path.exists(_fix_pr_info_file):
+    with open(_fix_pr_info_file) as _f:
+        _fix_info = json.load(_f)
+    PR_NUMBER = str(_fix_info["pr_number"])
+    os.environ.setdefault("PR_HEAD_REF", _fix_info.get("head_ref", ""))
+    os.environ.setdefault("PR_BASE_REF", _fix_info.get("base_ref", "main"))
+    os.environ.setdefault("PR_TITLE",    _fix_info.get("pr_title", ""))
+    print(f"[PR Review Agent] Triggered via workflow_run for PR #{PR_NUMBER}")
+else:
+    PR_NUMBER = os.environ["PR_NUMBER"]
 
 GITHUB_API  = "https://api.github.com"
 GH_HEADERS  = {

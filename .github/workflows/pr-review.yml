@@ -3,31 +3,42 @@ name: AI PR Review v2
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-  repository_dispatch:
-    types: [ai-fix-pr-review]
+  workflow_run:
+    workflows: ["AI Issue Fix Agent"]
+    types: [completed]
 
 # Prevent duplicate runs on the same PR
 concurrency:
-  group: pr-review-${{ github.event.pull_request.number || github.event.client_payload.pr_number }}
+  group: pr-review-${{ github.event.pull_request.number || github.event.workflow_run.id }}
   cancel-in-progress: true
 
 permissions:
   pull-requests: write   # post review comments
   contents: write        # read diff + commit auto-fixes to PR branch
+  actions: read          # download artifacts from the fix agent run
 
 jobs:
   ai-review:
     name: PMS AI Review (Score + PHI + Impact)
     runs-on: ubuntu-latest
-    # Skip Dependabot PRs but allow github-actions[bot] fix PRs from the Issue Fix Agent
-    if: github.actor != 'dependabot[bot]'
+    # Skip Dependabot PRs; for workflow_run only run if fix agent succeeded
+    if: |
+      (github.event_name == 'pull_request' && github.actor != 'dependabot[bot]') ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.client_payload.head_ref || github.event.pull_request.head.ref }}
+
+      - name: Download fix-pr-info artifact (workflow_run only)
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: fix-pr-info
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -41,17 +52,19 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_MODELS_TOKEN: ${{ secrets.GH_MODELS_TOKEN }}
-          PR_NUMBER: ${{ github.event.client_payload.pr_number || github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO_FULL_NAME: ${{ github.repository }}
-          PR_TITLE: ${{ github.event.client_payload.pr_title || github.event.pull_request.title }}
-          PR_BASE_REF: ${{ github.event.client_payload.base_ref || github.event.pull_request.base.ref }}
-          PR_HEAD_REF: ${{ github.event.client_payload.head_ref || github.event.pull_request.head.ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          # For workflow_run: these override the empty pull_request fields
+          FIX_PR_INFO_FILE: ${{ github.event_name == 'workflow_run' && 'fix_pr_info.json' || '' }}
         run: python .github/scripts/pr_review_agent.py
 
       - name: Upload review log
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: pr-review-log-${{ github.event.client_payload.pr_number || github.event.pull_request.number }}
+          name: pr-review-log-${{ github.event.pull_request.number || github.event.workflow_run.id }}
           path: pr_review_output.json
           if-no-files-found: ignore

@@ -186,32 +186,18 @@ def comment_on_issue(message: str):
     ).raise_for_status()
 
 
-def trigger_pr_review(fix_branch: str, pr_number: str, pr_title: str, base_ref: str):
-    """Fire a repository_dispatch event to trigger the PR Review Agent workflow."""
-    pat_headers = {
-        "Authorization": f"Bearer {PAT_TOKEN}",
-        "Accept": "application/vnd.github.v3+json",
-        "X-GitHub-Api-Version": "2022-11-28",
+def write_pr_info(fix_branch: str, pr_number: str, pr_title: str, base_ref: str):
+    """Write PR info to a JSON file so the PR Review Agent can pick it up via artifact."""
+    import json as _json
+    data = {
+        "pr_number": pr_number,
+        "pr_title":  pr_title,
+        "head_ref":  fix_branch,
+        "base_ref":  base_ref,
     }
-    try:
-        r = requests.post(
-            f"{GITHUB_API}/repos/{REPO_FULL_NAME}/dispatches",
-            headers=pat_headers,
-            json={
-                "event_type": "ai-fix-pr-review",
-                "client_payload": {
-                    "pr_number": pr_number,
-                    "pr_title":  pr_title,
-                    "head_ref":  fix_branch,
-                    "base_ref":  base_ref,
-                },
-            },
-            timeout=30,
-        )
-        r.raise_for_status()
-        print(f"  Triggered PR Review Agent on PR #{pr_number} via repository_dispatch.")
-    except Exception as e:
-        print(f"  Warning: could not trigger PR Review Agent: {e}")
+    with open("fix_pr_info.json", "w") as f:
+        _json.dump(data, f)
+    print(f"  Wrote fix_pr_info.json for PR #{pr_number} — PR Review Agent will trigger via workflow_run.")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Issue parsing
@@ -477,9 +463,9 @@ def main():
     pr_url = raise_pr(fix_branch, file_path, summary)
     print(f"  Fix PR: {pr_url}")
 
-    # Step 8 — Trigger PR Review Agent automatically via repository_dispatch
+    # Step 8 — Write PR info artifact so PR Review Agent triggers via workflow_run
     fix_pr_number = pr_url.rstrip("/").split("/")[-1]
-    trigger_pr_review(fix_branch, fix_pr_number, f"[ai-fix] #{ISSUE_NUMBER}: {ISSUE_TITLE}", DEFAULT_BRANCH)
+    write_pr_info(fix_branch, fix_pr_number, f"[ai-fix] #{ISSUE_NUMBER}: {ISSUE_TITLE}", DEFAULT_BRANCH)
 
     # Step 10 — Comment on issue
     comment_on_issue("\n".join([
