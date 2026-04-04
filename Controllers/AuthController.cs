@@ -7,9 +7,9 @@ namespace Patient_Management_System.Controllers
 {
     [ApiController]
     [Route("auth/")]
-    public class AuthController(AuthService authService): ControllerBase
+    public class AuthController(IAuthService authService): ControllerBase
     {
-        AuthService _authService = authService;
+        IAuthService _authService = authService;
 
         [HttpPost("signup")]
         public async Task<ActionResult> Signup(User user)

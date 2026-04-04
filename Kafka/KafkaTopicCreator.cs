@@ -5,6 +5,7 @@ namespace Patient_Management_System.Kafka
 {
     public class KafkaTopicCreator(IConfiguration config)
     {
+        public static readonly string PatientUpdatedTopic = "patient-updated";
         private readonly IConfiguration _config = config;
         public async Task CreateTopics()
         {
@@ -44,6 +45,12 @@ namespace Patient_Management_System.Kafka
                         Name = _config["Kafka:BillingCreatedTopic"],
                         NumPartitions = 1,
                         ReplicationFactor = 1
+                    },
+                    new TopicSpecification
+                    {
+                        Name = "patient-updated",
+                        NumPartitions = 1,
+                        ReplicationFactor = 3
                     },
                 });
 

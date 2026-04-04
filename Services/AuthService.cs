@@ -10,7 +10,7 @@ using Patient_Management_System.Exceptions;
 
 namespace Patient_Management_System.Services
 {
-    public class AuthService(AppDbContext context, IConfiguration config)
+    public class AuthService(AppDbContext context, IConfiguration config) : IAuthService
     {
         private readonly AppDbContext _context = context;
         private readonly IConfiguration _config = config;

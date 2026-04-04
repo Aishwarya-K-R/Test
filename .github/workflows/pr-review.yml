@@ -1,0 +1,54 @@
+name: AI PR Review v2
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# Prevent duplicate runs on the same PR
+concurrency:
+  group: pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  pull-requests: write   # post review comments
+  contents: write        # read diff + commit auto-fixes to PR branch
+
+jobs:
+  ai-review:
+    name: PMS AI Review (Score + PHI + Impact)
+    runs-on: ubuntu-latest
+    # Skip if the PR is from a bot (e.g. Dependabot)
+    if: github.actor != 'dependabot[bot]' && github.actor != 'github-actions[bot]'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install agent dependencies
+        run: pip install openai requests
+
+      - name: Run PR Review Agent
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_MODELS_TOKEN: ${{ secrets.GH_MODELS_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO_FULL_NAME: ${{ github.repository }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: python .github/scripts/pr_review_agent.py
+
+      - name: Upload review log
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr-review-log-${{ github.event.pull_request.number }}
+          path: pr_review_output.json
+          if-no-files-found: ignore

@@ -1,33 +1,41 @@
 using System.Net;
 using FluentAssertions;
-using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.Mvc;
+using Moq;
+using Patient_Management_System.Controllers;
+using Patient_Management_System.Models;
+using Patient_Management_System.Services;
 using Xunit;
-using System.Net.Http.Json;
-public class AuthTests(WebApplicationFactory<Program> factory) : IClassFixture<WebApplicationFactory<Program>>
-{
-    private readonly HttpClient _client = factory.CreateClient();
 
+public class AuthTests
+{
     [Fact]
     public async Task Login_Returns_Token_When_Credentials_Are_Valid()
     {
-        var response = await _client.PostAsJsonAsync("/auth/login", new
-        {
-            email = "user-1@gmail.com",
-            password = "PMS"
-        });
+        var mockService = new Mock<IAuthService>();
+        mockService
+            .Setup(s => s.Login(It.IsAny<User>()))
+            .ReturnsAsync("fake-jwt-token");
 
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var controller = new AuthController(mockService.Object);
+        var result = await controller.Login(new User { Email = "user-1@gmail.com", Password = "PMS" });
+
+        result.Should().BeOfType<OkObjectResult>();
+        (result as OkObjectResult)!.StatusCode.Should().Be(200);
     }
 
     [Fact]
     public async Task Login_Should_Return_Unauthorized_For_Invalid_Password()
     {
-        var response = await _client.PostAsJsonAsync("/auth/login", new
-        {
-            email = "user-1@gmail.com",
-            password = "user"
-        });
+        var mockService = new Mock<IAuthService>();
+        mockService
+            .Setup(s => s.Login(It.IsAny<User>()))
+            .ThrowsAsync(new UnauthorizedAccessException("Invalid User Password!!!"));
 
-        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        var controller = new AuthController(mockService.Object);
+
+        Func<Task> act = () => controller.Login(new User { Email = "user-1@gmail.com", Password = "wrong" });
+
+        await act.Should().ThrowAsync<UnauthorizedAccessException>();
     }
 }

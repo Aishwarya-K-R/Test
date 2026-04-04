@@ -7,20 +7,20 @@ namespace Patient_Management_System.Controllers
 {
     [ApiController]
     [Route("api/")]
-    public class PatientController(PatientService patientService) : ControllerBase
+    public class PatientController(IPatientService patientService) : ControllerBase
     {
-        private readonly PatientService _patientService = patientService;
+        private readonly IPatientService _patientService = patientService;
 
         [Authorize]
         [HttpGet("patients")]
         public async Task<ActionResult> GetPatients(string search = "", string sortCol = "Id", string sortDir = "asc", int pageNo = 1, int pageSize = 10)
         {
-            if(!ModelState.IsValid)
+            if (!ModelState.IsValid)
             {
                 return BadRequest(ModelState);
             }
             var patients = await _patientService.GetPatientsAsync(search, sortCol, sortDir, pageNo, pageSize);
-            if(patients == null || !patients.Any())
+            if (patients == null || !patients.Any())
             {
                 return Ok("No patients found!!!");
             }
@@ -31,7 +31,7 @@ namespace Patient_Management_System.Controllers
         [HttpGet("patient/{id}")]
         public async Task<ActionResult> GetPatientById(int id)
         {
-            if(!ModelState.IsValid)
+            if (!ModelState.IsValid)
             {
                 return BadRequest(ModelState);
             }
@@ -43,7 +43,7 @@ namespace Patient_Management_System.Controllers
         [HttpPost("patient")]
         public async Task<ActionResult> CreatePatient(Patient patient)
         {
-            if(!ModelState.IsValid)
+            if (!ModelState.IsValid)
             {
                 return BadRequest(ModelState);
             }
@@ -55,7 +55,7 @@ namespace Patient_Management_System.Controllers
         [HttpPut("patient/{id}")]
         public async Task<ActionResult> UpdatePatient(int id, Patient patient)
         {
-            if(!ModelState.IsValid)
+            if (!ModelState.IsValid)
             {
                 return BadRequest(ModelState);
             }

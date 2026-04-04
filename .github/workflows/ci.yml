@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─────────────────────────────────────────────
+  # Job 1: Build & Test
+  # ─────────────────────────────────────────────
+  build-and-test:
+    name: Build & Test (.NET 8)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore dependencies
+        run: |
+          dotnet restore "PMS.csproj"
+          dotnet restore "PMS.Tests/PMS.Tests.csproj"
+
+      - name: Build (Release)
+        run: dotnet build "PMS.csproj" --no-restore --configuration Release
+
+      - name: Run tests with coverage
+        run: dotnet test "PMS.Tests/PMS.Tests.csproj" --configuration Release --logger "trx;LogFileName=test-results.trx" --collect:"XPlat Code Coverage"
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: PMS.Tests/TestResults/
+          if-no-files-found: ignore
+
+  # ─────────────────────────────────────────────
+  # Job 2: Docker Build Validation
+  # ─────────────────────────────────────────────
+  docker-validate:
+    name: Validate Docker Builds
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        dockerfile:
+          - Dockerfile.api-gateway
+          - Dockerfile.auth
+          - Dockerfile.patient
+          - Dockerfile.billing
+          - Dockerfile.llm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.dockerfile }} (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: false
+          cache-from: type=gha,scope=${{ matrix.dockerfile }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.dockerfile }}
+
+  # ─────────────────────────────────────────────
+  # Job 3: Proto Lint
+  # ─────────────────────────────────────────────
+  proto-lint:
+    name: Lint Protobuf Files
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install buf
+        uses: bufbuild/buf-setup-action@v1
+
+      - name: Lint proto files
+        run: |
+          cd Protos
+          if [ -f buf.yaml ]; then
+            buf lint
+          else
+            echo "No buf.yaml found — skipping buf lint."
+          fi
+
+  # ─────────────────────────────────────────────
+  # Job 4: Security Scan (secret detection)
+  # ─────────────────────────────────────────────
+  secret-scan:
+    name: Secret Detection
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -54,4 +54,8 @@
     <Protobuf Include="Protos/*.proto" GrpcServices="Both" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Remove="PMS.Tests/**" />
+  </ItemGroup>
+
 </Project>

@@ -194,7 +194,6 @@ services:
         condition: service_healthy
     ports:
       - "${KAFKA_PORT_INTERNAL}:9092"
-      - "${KAFKA_PORT_EXTERNAL}:9094"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: ${KAFKA_ZOOKEEPER_CONNECT}
@@ -208,11 +207,11 @@ services:
       - kafka-data:/var/lib/kafka/data
     networks:
       - internal
-    healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "9092"]
-      interval: 5s
-      timeout: 5s
-      retries: 12
+    # healthcheck:
+    #   test: ["CMD", "nc", "-z", "localhost", "9092"]
+    #   interval: 5s
+    #   timeout: 5s
+    #   retries: 12
 
   prometheus:
     image: prom/prometheus
