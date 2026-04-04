@@ -842,7 +842,16 @@ def post_github_review(pr: dict, review: dict, security: dict,
         print(f"  Warning: inline comments failed ({r.status_code}), retrying without them...")
         payload["comments"] = []
         r = requests.post(url, headers=GH_HEADERS, json=payload, timeout=30)
-        r.raise_for_status()
+
+    if not r.ok:
+        # Bot-raised PRs (e.g. from Issue Fix Agent) don't allow formal reviews
+        # Fall back to a plain issue comment so the review is still visible
+        print(f"  Warning: review API failed ({r.status_code}), falling back to issue comment...")
+        comment_url = f"{GITHUB_API}/repos/{REPO_FULL_NAME}/issues/{PR_NUMBER}/comments"
+        rc = requests.post(comment_url, headers=GH_HEADERS, json={"body": body}, timeout=30)
+        rc.raise_for_status()
+        print(f"  Review posted as issue comment.")
+        return {}
 
     print(f"  Review posted: {r.json().get('html_url', 'N/A')}")
     return r.json()
