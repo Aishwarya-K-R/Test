@@ -5,15 +5,14 @@ Patient Management System — AI Issue Fix Agent
 Triggered when a GitHub Issue is labeled 'bug'.
 
 Flow:
-  1. Parse issue body to extract affected file + bug description
-  2. Fetch file content from GitHub
-  3. Ask GPT-4o to generate a targeted fix
-  4. Create branch fix/issue-{N}-{slug}
-  5. Commit the fix
-  6. Raise a PR referencing the issue
-  7. Comment on the issue with the PR link
-
-The raised PR is automatically reviewed by the PR Review Agent.
+  1. Fetch the repo file tree from GitHub
+  2. Ask GPT-4o which file is most likely affected by the issue
+  3. Fetch that file's content
+  4. Ask GPT-4o to generate a targeted fix
+  5. Create branch fix/issue-{N}-{slug}
+  6. Commit the fix
+  7. Raise a PR referencing the issue (triggers PR Review Agent)
+  8. Comment on the issue with the PR link
 
 Required env vars:
   GITHUB_TOKEN    — GitHub Actions token
@@ -52,6 +51,12 @@ GH_HEADERS = {
     "X-GitHub-Api-Version": "2022-11-28",
 }
 
+# File extensions the agent can fix
+FIXABLE_EXTENSIONS = {".cs", ".py", ".yml", ".yaml", ".json", ".proto"}
+
+# Paths to skip (generated/binary/noise)
+SKIP_PREFIXES = ("obj/", "bin/", ".git/", "PMS.Tests/obj/", "PMS.Tests/bin/", "db-data/")
+
 # ─────────────────────────────────────────────────────────────────────────────
 # GitHub helpers
 # ─────────────────────────────────────────────────────────────────────────────
@@ -60,6 +65,23 @@ def gh_get(path: str) -> requests.Response:
     r = requests.get(f"{GITHUB_API}{path}", headers=GH_HEADERS, timeout=30)
     r.raise_for_status()
     return r
+
+
+def get_repo_file_tree(branch: str) -> list[str]:
+    """Fetch all file paths in the repo (filtered to fixable extensions)."""
+    r = gh_get(f"/repos/{REPO_FULL_NAME}/git/trees/{branch}?recursive=1")
+    tree = r.json().get("tree", [])
+    files = []
+    for item in tree:
+        if item["type"] != "blob":
+            continue
+        path = item["path"]
+        if any(path.startswith(skip) for skip in SKIP_PREFIXES):
+            continue
+        ext = os.path.splitext(path)[1].lower()
+        if ext in FIXABLE_EXTENSIONS:
+            files.append(path)
+    return files
 
 
 def get_file(file_path: str, ref: str) -> tuple[str, str]:
@@ -83,7 +105,6 @@ def create_branch(branch_name: str, sha: str):
         timeout=30,
     )
     if r.status_code == 422:
-        # Branch already exists — reset to sha
         requests.patch(
             f"{GITHUB_API}/repos/{REPO_FULL_NAME}/git/refs/heads/{branch_name}",
             headers=GH_HEADERS,
@@ -129,7 +150,6 @@ def raise_pr(fix_branch: str, file_path: str, fix_summary: str) -> str:
         "",
         "*Raised by **PMS AI Fix Agent***",
     ])
-
     r = requests.post(
         f"{GITHUB_API}/repos/{REPO_FULL_NAME}/pulls",
         headers=GH_HEADERS,
@@ -142,7 +162,6 @@ def raise_pr(fix_branch: str, file_path: str, fix_summary: str) -> str:
         timeout=30,
     )
     if r.status_code == 422:
-        # PR already exists
         existing = requests.get(
             f"{GITHUB_API}/repos/{REPO_FULL_NAME}/pulls",
             headers=GH_HEADERS,
@@ -157,58 +176,115 @@ def raise_pr(fix_branch: str, file_path: str, fix_summary: str) -> str:
     return r.json()["html_url"]
 
 
-def comment_on_issue(pr_url: str, file_path: str):
-    body = "\n".join([
-        "## 🤖 AI Fix Agent — Fix PR Raised",
-        "",
-        f"A fix has been automatically generated for this issue.",
-        "",
-        f"👉 **[View Fix PR]({pr_url})**",
-        "",
-        f"**File fixed:** `{file_path}`",
-        "",
-        "The **PR Review Agent** is now analysing the fix.",
-        "Please review the PR and the AI review before merging.",
-        "",
-        "*Raised by **PMS AI Fix Agent***",
-    ])
-    r = requests.post(
+def comment_on_issue(message: str):
+    requests.post(
         f"{GITHUB_API}/repos/{REPO_FULL_NAME}/issues/{ISSUE_NUMBER}/comments",
         headers=GH_HEADERS,
-        json={"body": body},
+        json={"body": message},
         timeout=30,
-    )
-    r.raise_for_status()
+    ).raise_for_status()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Issue parsing
 # ─────────────────────────────────────────────────────────────────────────────
 
 def parse_issue_body(body: str) -> dict:
-    """
-    Extract structured fields from the bug report template.
-    Returns: { file, description, expected, actual, context }
-    """
     def extract_section(heading: str) -> str:
         pattern = rf"##\s+{heading}\s*\n(.*?)(?=\n##|\Z)"
         m = re.search(pattern, body, re.DOTALL | re.IGNORECASE)
         return m.group(1).strip() if m else ""
 
-    # Extract file path from the File section — looks for `path/to/file.cs`
-    file_section = extract_section("File")
-    file_match = re.search(r"`([^`]+\.[a-zA-Z]+)`", file_section)
-    file_path = file_match.group(1).strip() if file_match else None
-
     return {
-        "file":        file_path,
         "description": extract_section("Description"),
         "expected":    extract_section("Expected Behavior"),
         "actual":      extract_section("Actual Behavior"),
         "context":     extract_section("Additional Context"),
+        "steps":       extract_section("Steps to Reproduce"),
     }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# AI fix generation
+# AI — Step 1: identify affected file
+# ─────────────────────────────────────────────────────────────────────────────
+
+FILE_DETECT_PROMPT = """
+You are an expert .NET 8 engineer working on the Patient Management System (PMS).
+
+Architecture: YARP API Gateway → [Auth | Patient | Billing(gRPC) | AI/LLM] services → PostgreSQL + Redis + Kafka
+Tech: .NET 8, EF Core 8, Confluent.Kafka, gRPC/Protobuf, StackExchange.Redis, Serilog
+
+You will receive a bug report and a list of all files in the repository.
+
+Your task: identify the SINGLE most likely file that contains the bug.
+
+Rules:
+- Return the exact file path from the provided list
+- Prefer service files (.cs) over config files unless the bug is clearly config-related
+- If the bug mentions a specific class, method, or endpoint — map it to the correct file
+- If genuinely unsure, pick the most likely candidate
+
+Return ONLY valid JSON, no prose:
+{
+  "file": "<exact file path from the list>",
+  "reasoning": "<1 sentence explaining why this file>"
+}
+"""
+
+def identify_affected_file(issue: dict, file_tree: list[str]) -> tuple[str, str]:
+    """Returns (file_path, reasoning)."""
+    client = OpenAI(
+        base_url="https://models.inference.ai.azure.com",
+        api_key=GH_MODELS_TOKEN,
+    )
+
+    file_list = "\n".join(file_tree)
+    user_msg = f"""Bug report for the Patient Management System:
+
+**Title:** {ISSUE_TITLE}
+**Description:** {issue['description']}
+**Expected:** {issue['expected']}
+**Actual:** {issue['actual']}
+**Steps to reproduce:** {issue['steps']}
+**Additional context:** {issue['context']}
+
+Repository files:
+{file_list}
+
+Which single file most likely contains this bug?
+"""
+
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        max_tokens=512,
+        messages=[
+            {"role": "system", "content": FILE_DETECT_PROMPT},
+            {"role": "user",   "content": user_msg},
+        ],
+    )
+
+    raw = response.choices[0].message.content.strip()
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        m = re.search(r"\{[\s\S]*\}", raw)
+        data = json.loads(m.group()) if m else {}
+
+    file_path = data.get("file", "").strip()
+    reasoning = data.get("reasoning", "")
+
+    # Validate the returned file is actually in the tree
+    if file_path not in file_tree:
+        # Try fuzzy match
+        for f in file_tree:
+            if file_path and (file_path in f or f.endswith(file_path)):
+                file_path = f
+                break
+        else:
+            file_path = ""
+
+    return file_path, reasoning
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AI — Step 2: generate fix
 # ─────────────────────────────────────────────────────────────────────────────
 
 FIX_SYSTEM_PROMPT = """
@@ -217,25 +293,23 @@ You are an expert .NET 8 senior engineer working on the Patient Management Syste
 Architecture: YARP API Gateway → [Auth | Patient | Billing(gRPC) | AI/LLM] services → PostgreSQL + Redis + Kafka
 Tech: .NET 8, EF Core 8, Confluent.Kafka, gRPC/Protobuf, StackExchange.Redis, Serilog, xUnit
 
-You will receive:
-- A bug report (title, description, expected vs actual behavior)
-- The full content of the affected file
+You will receive a bug report and the full content of the affected file.
 
 Your task:
 1. Understand the bug
-2. Apply a minimal, targeted fix to the file
-3. Do NOT rewrite the entire file — only change what is necessary
+2. Apply a minimal, targeted fix — only change what is necessary
+3. Do NOT rewrite the entire file
 4. Return the complete fixed file content
 
 Return ONLY valid JSON, no prose:
 {
-  "fixed_content": "<complete fixed file content as a string>",
+  "fixed_content": "<complete fixed file content>",
   "summary": "<1-2 sentence explanation of what was changed and why>",
   "confidence": "high|medium|low"
 }
 """
 
-def generate_fix(issue: dict, file_content: str) -> dict:
+def generate_fix(issue: dict, file_path: str, file_content: str) -> dict:
     client = OpenAI(
         base_url="https://models.inference.ai.azure.com",
         api_key=GH_MODELS_TOKEN,
@@ -250,12 +324,12 @@ def generate_fix(issue: dict, file_content: str) -> dict:
 **Actual:** {issue['actual']}
 **Additional context:** {issue['context']}
 
-## File to fix: `{issue['file']}`
+## Affected file: `{file_path}`
 ```csharp
 {file_content[:12000]}
 ```
 
-Apply a minimal fix and return the complete fixed file content as JSON.
+Apply a minimal, targeted fix and return the complete fixed file content as JSON.
 """
 
     response = client.chat.completions.create(
@@ -298,86 +372,99 @@ def main():
     print("=" * 60)
     print(f"  Title : {ISSUE_TITLE}")
 
-    # Parse issue
+    # Parse issue body
     issue = parse_issue_body(ISSUE_BODY)
-    print(f"  File  : {issue['file'] or 'NOT FOUND in issue body'}")
 
-    if not issue["file"] or issue["file"] == "path/to/file.cs":
-        msg = (
-            "⚠️ Could not determine which file to fix.\n\n"
-            "Please update the issue and fill in the **File** field with the exact file path "
-            "(e.g. `Services/PatientService.cs`)."
+    # Step 1 — Fetch repo file tree
+    print(f"  Fetching repo file tree from {DEFAULT_BRANCH}...")
+    file_tree = get_repo_file_tree(DEFAULT_BRANCH)
+    print(f"  Found {len(file_tree)} fixable files")
+
+    # Step 2 — Identify affected file
+    print("  Identifying affected file with GPT-4o...")
+    file_path, reasoning = identify_affected_file(issue, file_tree)
+    print(f"  Identified : {file_path or 'UNKNOWN'}")
+    print(f"  Reasoning  : {reasoning}")
+
+    if not file_path:
+        comment_on_issue(
+            "⚠️ **AI Fix Agent** could not identify which file contains this bug.\n\n"
+            "Please add more detail to the issue (mention the class name, method name, "
+            "or endpoint that is failing) and re-apply the `bug` label to retry."
         )
-        requests.post(
-            f"{GITHUB_API}/repos/{REPO_FULL_NAME}/issues/{ISSUE_NUMBER}/comments",
-            headers=GH_HEADERS,
-            json={"body": msg},
-            timeout=30,
-        )
-        print("  No file specified — commented on issue. Exiting.")
+        print("  Could not identify file — commented on issue. Exiting.")
         sys.exit(0)
 
-    # Fetch file
-    print(f"  Fetching {issue['file']} from {DEFAULT_BRANCH}...")
+    # Step 3 — Fetch file content
+    print(f"  Fetching {file_path}...")
     try:
-        file_content, blob_sha = get_file(issue["file"], DEFAULT_BRANCH)
+        file_content, blob_sha = get_file(file_path, DEFAULT_BRANCH)
     except Exception as e:
-        print(f"  Error fetching file: {e}")
-        requests.post(
-            f"{GITHUB_API}/repos/{REPO_FULL_NAME}/issues/{ISSUE_NUMBER}/comments",
-            headers=GH_HEADERS,
-            json={"body": f"⚠️ Could not fetch `{issue['file']}`: `{e}`\nPlease verify the file path in the issue."},
-            timeout=30,
+        comment_on_issue(
+            f"⚠️ **AI Fix Agent** identified `{file_path}` as the affected file "
+            f"but could not fetch it: `{e}`"
         )
         sys.exit(1)
 
-    # Generate fix
+    # Step 4 — Generate fix
     print("  Generating fix with GPT-4o...")
-    result = generate_fix(issue, file_content)
+    result       = generate_fix(issue, file_path, file_content)
     fixed_content = result.get("fixed_content", "")
-    summary       = result.get("summary", "No summary provided.")
-    confidence    = result.get("confidence", "unknown")
+    summary      = result.get("summary", "No summary provided.")
+    confidence   = result.get("confidence", "unknown")
     print(f"  Confidence : {confidence}")
     print(f"  Summary    : {summary}")
 
     if not fixed_content or fixed_content.strip() == file_content.strip():
-        requests.post(
-            f"{GITHUB_API}/repos/{REPO_FULL_NAME}/issues/{ISSUE_NUMBER}/comments",
-            headers=GH_HEADERS,
-            json={"body": f"ℹ️ AI Fix Agent could not determine a fix for this issue.\n\n**Reason:** {summary}"},
-            timeout=30,
+        comment_on_issue(
+            f"ℹ️ **AI Fix Agent** identified `{file_path}` as the affected file "
+            f"but could not determine a fix.\n\n**Reason:** {summary}"
         )
         print("  No change produced — commented on issue.")
         sys.exit(0)
 
-    # Create fix branch
+    # Step 5 — Create fix branch
     fix_branch = f"fix/issue-{ISSUE_NUMBER}-{slugify(ISSUE_TITLE)}"
     print(f"  Creating branch: {fix_branch}")
     base_sha = get_branch_sha(DEFAULT_BRANCH)
     create_branch(fix_branch, base_sha)
 
-    # Commit fix
+    # Step 6 — Commit fix
     print(f"  Committing fix to {fix_branch}...")
     commit_fix(
-        file_path=issue["file"],
+        file_path=file_path,
         content=fixed_content,
         blob_sha=blob_sha,
         branch=fix_branch,
         message=f"fix: #{ISSUE_NUMBER} — {ISSUE_TITLE}\n\n{summary}",
     )
 
-    # Raise PR
+    # Step 7 — Raise PR
     print("  Raising fix PR...")
-    pr_url = raise_pr(fix_branch, issue["file"], summary)
+    pr_url = raise_pr(fix_branch, file_path, summary)
     print(f"  Fix PR: {pr_url}")
 
-    # Comment on issue
-    comment_on_issue(pr_url, issue["file"])
+    # Step 8 — Comment on issue
+    comment_on_issue("\n".join([
+        "## 🤖 AI Fix Agent — Fix PR Raised",
+        "",
+        f"Automatically identified **`{file_path}`** as the affected file.",
+        f"> {reasoning}",
+        "",
+        f"👉 **[View Fix PR]({pr_url})**",
+        "",
+        "The **PR Review Agent** is now analysing the fix.",
+        "Please review the PR and the AI review before merging.",
+        "",
+        f"*Confidence: `{confidence}`*",
+        "",
+        "*Raised by **PMS AI Fix Agent***",
+    ]))
     print("  Commented on issue.")
 
     print("=" * 60)
-    print(f"[DONE] Fix PR raised: {pr_url}")
-    print("       PR Review Agent will now analyse the fix automatically.")
+    print(f"[DONE] Fix PR: {pr_url}")
+    print("       PR Review Agent will analyse it automatically.")
 
 
 if __name__ == "__main__":

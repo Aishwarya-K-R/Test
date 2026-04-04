@@ -1,6 +1,6 @@
 ---
 name: Bug Report
-about: Report a bug for the AI fix agent to resolve
+about: Report a bug — the AI fix agent will locate and fix it automatically
 title: "[BUG] "
 labels: bug
 assignees: ''
@@ -8,10 +8,6 @@ assignees: ''
 
 ## Description
 <!-- Clear description of the bug -->
-
-## File
-<!-- Exact file path relative to repo root, e.g. Services/PatientService.cs -->
-`path/to/file.cs`
 
 ## Expected Behavior
 <!-- What should happen -->
