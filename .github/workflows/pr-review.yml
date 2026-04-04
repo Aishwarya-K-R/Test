@@ -17,8 +17,8 @@ jobs:
   ai-review:
     name: PMS AI Review (Score + PHI + Impact)
     runs-on: ubuntu-latest
-    # Skip if the PR is from a bot (e.g. Dependabot)
-    if: github.actor != 'dependabot[bot]' && github.actor != 'github-actions[bot]'
+    # Skip Dependabot PRs but allow github-actions[bot] fix PRs from the Issue Fix Agent
+    if: github.actor != 'dependabot[bot]'
 
     steps:
       - name: Checkout
