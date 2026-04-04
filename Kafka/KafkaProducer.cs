@@ -1,5 +1,7 @@
 using Confluent.Kafka;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Patient_Management_System.Kafka
 {
@@ -17,14 +19,14 @@ namespace Patient_Management_System.Kafka
             _producer = new ProducerBuilder<Null, string>(producerConfig).Build();
         }
 
-        public async Task PublishAsync(string topic, object message)
+        public async Task PublishAsync(string topic, object message, CancellationToken cancellationToken = default)
         {
             var json = JsonSerializer.Serialize(message);
 
             await _producer.ProduceAsync(topic, new Message<Null, string>
             {
                 Value = json
-            });
+            }, cancellationToken);
         }
     }
 }
