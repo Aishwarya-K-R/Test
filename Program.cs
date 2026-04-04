@@ -57,7 +57,7 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
 builder.Services.AddScoped<ContextService>();
 builder.Services.AddSingleton<RedisService>();
 builder.Services.AddHttpClient<LLMService>();
-builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IPatientService, PatientService>();
 builder.Services.AddScoped<BillingAccountService>();
 
