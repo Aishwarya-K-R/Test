@@ -111,10 +111,8 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    if (db.Database.IsRelational())
+    if (!app.Environment.IsEnvironment("Test"))
         db.Database.Migrate();
-    else
-        db.Database.EnsureCreated();
 }
 
 // Configure the HTTP request pipeline.
