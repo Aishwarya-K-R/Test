@@ -7,9 +7,9 @@ namespace Patient_Management_System.Controllers
 {
     [ApiController]
     [Route("api/")]
-    public class PatientController(PatientService patientService) : ControllerBase
+    public class PatientController(IPatientService patientService) : ControllerBase
     {
-        private readonly PatientService _patientService = patientService;
+        private readonly IPatientService _patientService = patientService;
 
         [Authorize]
         [HttpGet("patients")]

@@ -14,7 +14,7 @@ namespace Patient_Management_System.Services
         public const string PatientUpdatedTopic = "PatientUpdatedTopic";
     }
 
-    public class PatientService(AppDbContext context, IMemoryCache memoryCache, IDistributedCache redisCache, KafkaProducer kafkaProducer, ILogger<PatientService> logger, IConfiguration config, RedisService redis, ContextService contextService)
+    public class PatientService(AppDbContext context, IMemoryCache memoryCache, IDistributedCache redisCache, KafkaProducer kafkaProducer, ILogger<PatientService> logger, IConfiguration config, RedisService redis, ContextService contextService) : IPatientService
     {
         private readonly AppDbContext _context = context;
 

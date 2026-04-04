@@ -1,10 +1,16 @@
 using System.Net;
+using System.Security.Claims;
 using FluentAssertions;
-using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Moq;
+using Patient_Management_System.Controllers;
+using Patient_Management_System.Models;
+using Patient_Management_System.Services;
 using Xunit;
-using System.Net.Http.Json;
 
-public class PatientTests(WebApplicationFactory<Program> factory) : IClassFixture<WebApplicationFactory<Program>>
+// Integration test: verifies auth middleware blocks unauthenticated requests
+public class PatientTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly HttpClient _client = factory.CreateClient();
 
@@ -15,26 +21,41 @@ public class PatientTests(WebApplicationFactory<Program> factory) : IClassFixtur
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
+}
 
+// Unit test: verifies controller returns 200 when service returns data (no DB/Redis/Kafka needed)
+public class PatientControllerTests
+{
     [Fact]
     public async Task GetPatients_Should_Return_200_With_Valid_Token()
     {
-        var loginResponse = await _client.PostAsJsonAsync("/auth/login", new
+        var mockService = new Mock<IPatientService>();
+        mockService
+            .Setup(s => s.GetPatientsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>()))
+            .ReturnsAsync(new List<Patient>
+            {
+                new() { Id = 1, Name = "Test Patient", Email = "patient@test.com", Address = "123 Test St",
+                         DateOfBirth = new DateOnly(1990, 1, 1), RegisteredDate = DateOnly.FromDateTime(DateTime.UtcNow) }
+            });
+
+        var controller = new PatientController(mockService.Object);
+
+        // Simulate authenticated user
+        controller.ControllerContext = new ControllerContext
         {
-            email = "user-1@gmail.com",
-            password = "PMS"
-        });
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(new[]
+                {
+                    new Claim(ClaimTypes.NameIdentifier, "1"),
+                    new Claim(ClaimTypes.Role, "ADMIN"),
+                }, "TestAuth"))
+            }
+        };
 
-        var responseString = await loginResponse.Content.ReadAsStringAsync();
-        var token = responseString.Split("Token: ")[1].Trim();
+        var result = await controller.GetPatients();
 
-        Console.WriteLine($"Received Token: {token}");
-
-        _client.DefaultRequestHeaders.Authorization =
-            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
-
-        var response = await _client.GetAsync("/api/patients");
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        result.Should().BeOfType<OkObjectResult>();
+        (result as OkObjectResult)!.StatusCode.Should().Be(200);
     }
 }

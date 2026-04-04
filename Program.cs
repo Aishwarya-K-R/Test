@@ -58,7 +58,7 @@ builder.Services.AddScoped<ContextService>();
 builder.Services.AddSingleton<RedisService>();
 builder.Services.AddHttpClient<LLMService>();
 builder.Services.AddScoped<AuthService>();
-builder.Services.AddScoped<PatientService>();
+builder.Services.AddScoped<IPatientService, PatientService>();
 builder.Services.AddScoped<BillingAccountService>();
 
 builder.Host.UseSerilog((context, config) =>
@@ -111,7 +111,10 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.Migrate();
+    if (db.Database.IsRelational())
+        db.Database.Migrate();
+    else
+        db.Database.EnsureCreated();
 }
 
 // Configure the HTTP request pipeline.
