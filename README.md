@@ -56,6 +56,43 @@ Developer raises a GitHub Issue (bug)
 
 ---
 
+## 🎬 Agent in Action
+
+### Step 1 — Bug Issue Raised
+> Developer files a structured bug report and adds the `bug` label. The issue template ensures GPT-4o gets enough context to identify the affected file accurately.
+
+![Bug Issue Raised](.github/1-bug-issue.png)
+
+---
+
+### Step 2 — Both Agents Run Automatically (~24s each)
+> Fix Agent triggers on the `bug` label. On completion, `workflow_run` fires the Review Agent automatically — no manual trigger, no PAT needed.
+
+![Actions Tab — Both Agents Run](.github/5-actions-tab.png)
+
+---
+
+### Step 3 — Fix PR Auto-Raised by AI Agent
+> Agent identifies `Kafka/KafkaConsumer.cs` as the affected file, generates a targeted fix, creates a branch, and raises a PR — all autonomously. `github-actions[bot]` is the author.
+
+![Fix PR Auto-Raised](.github/2-fix-pr.png)
+
+---
+
+### Step 4 — PR Review Agent Logs (Two-Pass Scan)
+> Review Agent runs two passes: PHI/Security scan followed by full code quality review. Health Score calculated and verdict posted. Exits with code 1 on critical issues — blocking the merge.
+
+![PR Review Agent Logs](.github/3-review-logs.png)
+
+---
+
+### Step 5 — AI Review Comment on PR
+> Detailed review posted directly on the fix PR — PHI risks, critical issues, suggestions with file + line references, and a Health Score badge. Merge is blocked until issues are resolved.
+
+![AI Review Comment](.github/4-review-comment.png)
+
+---
+
 ## ⚙️ Components
 
 ### 1. 🛠️ AI Issue Fix Agent
@@ -97,13 +134,13 @@ Developer raises a GitHub Issue (bug)
 2.  Add the 'bug' label
         │
         ▼
-3.  AI Fix Agent runs (~30s)
+3.  AI Fix Agent runs (~24s)
     ├── Auto-detects affected file from issue description
     ├── Generates targeted fix with GPT-4o
     └── Raises fix PR on a new branch
         │
         ▼ (workflow_run — automatic)
-4.  AI Review Agent runs (~30s)
+4.  AI Review Agent runs (~22s)
     ├── Pass 1: PHI & security scan
     ├── Pass 2: Code quality review
     ├── Posts Health Score + detailed comment on PR
@@ -174,16 +211,6 @@ Developer raises a GitHub Issue (bug)
 └── ISSUE_TEMPLATE/
     └── bug_report.md           # Structured bug report template
 ```
-
----
-
-## 📸 Agent in Action
-
-### Fix Agent — Auto-detects file and raises PR
-> Issue labeled `bug` → agent identifies `Kafka/KafkaConsumer.cs` → generates fix → raises PR in ~27s
-
-### Review Agent — Two-pass AI review with Health Score
-> Triggered automatically → PHI scan + code quality review → posts score and detailed comment on PR
 
 ---
 
